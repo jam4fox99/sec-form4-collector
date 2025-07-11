@@ -9,8 +9,8 @@ database:
   host: "localhost"
   port: 5432
   name: "insider_trading"
-  user: "insider_user"
-  password: "insider_password"
+  user: "sec_user"
+  password: "SecurePass2024"
 
 processing:
   batch_size: 1000
