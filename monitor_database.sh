@@ -14,7 +14,7 @@ while true; do
     echo ""
     
     # Get database statistics
-    psql -U sec_user -d insider_trading -c "
+    PGPASSWORD=SecurePass2024 psql -h localhost -U sec_user -d insider_trading -c "
     SELECT 
         'Total Filings' as metric,
         COUNT(*) as count
@@ -43,7 +43,7 @@ while true; do
     
     echo ""
     echo "Recent activity (last 10 filings):"
-    psql -U sec_user -d insider_trading -c "
+    PGPASSWORD=SecurePass2024 psql -h localhost -U sec_user -d insider_trading -c "
     SELECT 
         document_date,
         company_name,
