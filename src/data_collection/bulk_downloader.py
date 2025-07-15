@@ -563,6 +563,33 @@ class SECBulkDownloader:
         logger.info(f"Filing storage complete: {stats['stored']} stored, {stats['errors']} errors, {stats['skipped']} skipped")
         return stats
 
+    def download_year(self, year: int, force: bool = False) -> bool:
+        """
+        Download all Form 4 filings for a specific year.
+        
+        Args:
+            year: Year to download
+            force: Force re-download even if already completed
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Use the existing bulk_download_year method
+            result = self.bulk_download_year(year)
+            
+            # Consider it successful if we got any filings
+            if result['total_filings'] > 0:
+                logger.info(f"✅ Successfully downloaded {result['total_filings']:,} filings for year {year}")
+                return True
+            else:
+                logger.warning(f"❌ No filings found for year {year}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error downloading year {year}: {e}")
+            return False
+
 
 def main():
     """Test the bulk downloader."""
