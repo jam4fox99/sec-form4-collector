@@ -575,13 +575,25 @@ class SECBulkDownloader:
             True if successful, False otherwise
         """
         try:
-            # Use the existing bulk_download_year method
+            # Get database manager
+            from ..database.db_manager import get_db_manager
+            db_manager = get_db_manager()
+            
+            # Use the existing bulk_download_year method to get filings list
             result = self.bulk_download_year(year)
             
-            # Consider it successful if we got any filings
+            # Check if we got any filings
             if result['total_filings'] > 0:
-                logger.info(f"✅ Successfully downloaded {result['total_filings']:,} filings for year {year}")
-                return True
+                logger.info(f"📥 Found {result['total_filings']:,} filings for year {year}")
+                
+                # Download and store the actual filing content
+                all_filings = result['all_filings']
+                storage_stats = self.download_and_store_filings(all_filings, db_manager, force=force)
+                
+                logger.info(f"✅ Year {year} complete: {storage_stats['stored']:,} stored, {storage_stats['errors']:,} errors")
+                
+                # Consider successful if we stored at least some filings
+                return storage_stats['stored'] > 0
             else:
                 logger.warning(f"❌ No filings found for year {year}")
                 return False
