@@ -161,6 +161,27 @@ class InsiderPerformance(Base):
     insider = relationship("Insider", back_populates="performance_records")
 
 
+class DownloadedYear(Base):
+    """Track which years have been downloaded and their status"""
+    __tablename__ = 'downloaded_years'
+    
+    id = Column(Integer, primary_key=True)
+    year = Column(Integer, unique=True, index=True)
+    status = Column(String(20), default='pending')  # pending, in_progress, completed, failed
+    total_filings = Column(Integer, default=0)
+    processed_quarters = Column(Integer, default=0)
+    download_started = Column(DateTime)
+    download_completed = Column(DateTime)
+    last_updated = Column(DateTime, default=datetime.utcnow)
+    error_message = Column(Text)
+    
+    # Download stats
+    downloaded_count = Column(Integer, default=0)
+    stored_count = Column(Integer, default=0)
+    error_count = Column(Integer, default=0)
+    skipped_count = Column(Integer, default=0)
+
+
 # Additional indexes for performance optimization
 from sqlalchemy import Index
 

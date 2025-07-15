@@ -141,6 +141,216 @@ def show_database_stats():
         logger.info(f"  {table_name}: {count:,} records")
 
 
+def show_downloaded_years():
+    """Show status of downloaded years"""
+    print("📊 Downloaded Years Status:")
+    
+    db_manager = get_db_manager()
+    downloaded_years = db_manager.get_downloaded_years()
+    
+    if not downloaded_years:
+        print("   No years downloaded yet")
+        return
+    
+    # Sort years for display
+    sorted_years = sorted(downloaded_years.keys())
+    
+    for year in sorted_years:
+        status = downloaded_years[year]
+        status_icon = {
+            'completed': '✅',
+            'in_progress': '🔄',
+            'failed': '❌',
+            'pending': '⏳'
+        }.get(status, '❓')
+        
+        print(f"   {year}: {status_icon} {status}")
+    
+    # Show summary
+    status_counts = {}
+    for status in downloaded_years.values():
+        status_counts[status] = status_counts.get(status, 0) + 1
+    
+    print(f"\n📈 Summary:")
+    for status, count in status_counts.items():
+        print(f"   {status}: {count} years")
+
+
+def cmd_bulk(args):
+    """Process data using true bulk downloads (NO rate limiting)"""
+    print("🚀 Starting TRUE bulk download (NO rate limiting)...")
+    
+    from src.data_collection.bulk_downloader import SECBulkDownloader
+    
+    # Setup database
+    print("Setting up database...")
+    db_manager = setup_database()
+    
+    # Initialize bulk downloader with threading
+    max_threads = getattr(args, 'threads', 6)  # Conservative default to avoid rate limiting
+    force_download = getattr(args, 'force', False)
+    downloader = SECBulkDownloader(max_workers=max_threads)
+    
+    print(f"⚙️ Using {max_threads} threads (use --threads to adjust, max 8 recommended)")
+    if max_threads > 8:
+        print("⚠️ WARNING: High thread counts may trigger SEC rate limiting!")
+    
+    if force_download:
+        print("🔥 FORCE MODE: Re-downloading ALL filings (ignoring existing ones)")
+    
+    try:
+        # Step 1: Find all filings (fast)
+        print(f"📋 Step 1: Finding all {args.start_year}-{args.end_year} filings...")
+        
+        all_filings = []
+        for year in range(args.start_year, args.end_year + 1):
+            year_stats = downloader.bulk_download_year(year)
+            all_filings.extend(year_stats['all_filings'])
+        
+        print(f"📊 Found {len(all_filings):,} total Form 4 filings!")
+        
+        # Step 2: Download and store filing content
+        print(f"\n📥 Step 2: Downloading and storing filing content...")
+        print(f"   Processing {len(all_filings):,} filings...")
+        
+        storage_stats = downloader.download_and_store_filings(all_filings, db_manager, force=force_download)
+        
+        print(f"\n✅ Bulk download and storage completed!")
+        print(f"   Total filings found: {len(all_filings):,}")
+        print(f"   Successfully stored: {storage_stats['stored']:,}")
+        print(f"   Already existed: {storage_stats['skipped']:,}")
+        print(f"   Errors: {storage_stats['errors']:,}")
+        
+        logger.info("Bulk download completed successfully!")
+        
+    except KeyboardInterrupt:
+        logger.info("Operation cancelled by user")
+    except Exception as e:
+        logger.error(f"Error in bulk download: {e}")
+        raise
+
+
+def cmd_conservative_bulk(args):
+    """Process data using conservative bulk downloads (rate-limit safe)"""
+    print("🛡️ Starting CONSERVATIVE bulk download (rate-limit safe)...")
+    
+    from src.data_collection.bulk_downloader import SECBulkDownloader
+    
+    # Setup database
+    print("Setting up database...")
+    db_manager = setup_database()
+    
+    # Initialize bulk downloader with conservative settings
+    max_threads = getattr(args, 'threads', 4)  # Default to 4 threads
+    force_download = getattr(args, 'force', False)
+    downloader = SECBulkDownloader(max_workers=max_threads)
+    
+    print(f"⚙️ Using {max_threads} threads (conservative rate-limit safe)")
+    if max_threads <= 4:
+        print("⚠️  This will take 2-4 hours and should avoid rate limiting!")
+    else:
+        print("⚠️  This will take 1-3 hours but may encounter some rate limiting!")
+    
+    if force_download:
+        print("🔥 FORCE MODE: Re-downloading ALL filings (ignoring existing ones)")
+    
+    try:
+        # Check downloaded years status
+        print(f"📊 Checking status of years {args.start_year}-{args.end_year}...")
+        downloaded_years = db_manager.get_downloaded_years()
+        years_to_process = []
+        
+        for year in range(args.start_year, args.end_year + 1):
+            status = downloaded_years.get(year, None)
+            if status == 'completed' and not force_download:
+                print(f"   {year}: ✅ Already downloaded")
+            elif status == 'in_progress':
+                print(f"   {year}: 🔄 In progress - resuming")
+                years_to_process.append(year)
+            elif status == 'failed':
+                print(f"   {year}: ❌ Previously failed - retrying")
+                years_to_process.append(year)
+            else:
+                print(f"   {year}: ⏳ Not downloaded")
+                years_to_process.append(year)
+        
+        if not years_to_process:
+            print("✅ All requested years already downloaded!")
+            return
+        
+        print(f"\n📋 Processing {len(years_to_process)} years: {years_to_process}")
+        
+        # Process each year individually
+        for year in years_to_process:
+            print(f"\n📅 Processing year {year}...")
+            
+            # Mark year as in progress
+            db_manager.set_year_status(year, 'in_progress')
+            
+            try:
+                # Step 1: Find all filings for this year
+                print(f"   🔍 Finding {year} filings...")
+                year_stats = downloader.bulk_download_year(year)
+                all_filings = year_stats['all_filings']
+                
+                if not all_filings:
+                    print(f"   ⚠️ No filings found for {year}")
+                    db_manager.set_year_status(year, 'completed', 
+                                             total_filings=0, 
+                                             processed_quarters=year_stats['processed_quarters'])
+                    continue
+                
+                print(f"   📊 Found {len(all_filings):,} Form 4 filings!")
+                
+                # Update database with discovery stats
+                db_manager.set_year_status(year, 'in_progress',
+                                         total_filings=len(all_filings),
+                                         processed_quarters=year_stats['processed_quarters'])
+                
+                # Step 2: Download and store filing content
+                print(f"   📥 Downloading and storing {len(all_filings):,} filings...")
+                # Estimate time based on thread count (roughly 2 seconds per filing / thread count)
+                estimated_hours = (len(all_filings) * 2) / (max_threads * 3600)
+                print(f"   ⏰ Estimated time: {estimated_hours:.1f} hours with {max_threads} threads")
+                
+                storage_stats = downloader.download_and_store_filings(all_filings, db_manager, force=force_download)
+                
+                # Update final stats
+                db_manager.set_year_status(year, 'completed',
+                                         downloaded_count=storage_stats['downloaded'],
+                                         stored_count=storage_stats['stored'],
+                                         error_count=storage_stats['errors'],
+                                         skipped_count=storage_stats['skipped'])
+                
+                print(f"   ✅ {year} completed!")
+                print(f"      Downloaded: {storage_stats['downloaded']:,}")
+                print(f"      Stored: {storage_stats['stored']:,}")
+                print(f"      Skipped: {storage_stats['skipped']:,}")
+                print(f"      Errors: {storage_stats['errors']:,}")
+                
+            except Exception as e:
+                error_msg = str(e)
+                print(f"   ❌ {year} failed: {error_msg}")
+                db_manager.set_year_status(year, 'failed', error_message=error_msg)
+                logger.error(f"Year {year} failed: {error_msg}")
+                
+                # Continue with next year instead of failing completely
+                continue
+        
+        print(f"\n✅ Conservative bulk download completed!")
+        logger.info("Conservative bulk download completed successfully!")
+        
+    except KeyboardInterrupt:
+        logger.info("Operation cancelled by user")
+        # Mark any in-progress years as failed
+        for year in years_to_process:
+            if db_manager.get_year_status(year) == 'in_progress':
+                db_manager.set_year_status(year, 'failed', error_message='Cancelled by user')
+    except Exception as e:
+        logger.error(f"Error in conservative bulk download: {e}")
+        raise
+
+
 def main():
     """Main function"""
     parser = argparse.ArgumentParser(
@@ -153,6 +363,10 @@ Examples:
   python main.py sample                   # Process sample data
   python main.py historical 2020 2024    # Process historical data
   python main.py stats                    # Show database statistics
+  python main.py years                    # Show downloaded years status
+  python main.py bulk 2020 2024          # Download using true bulk method (fast)
+  python main.py conservative_bulk 2023 2023  # Download 2023 data (rate-limit safe, 4 threads)
+  python main.py conservative_bulk 2023 2023 --threads 6  # Download 2023 data (faster, 6 threads)
         """
     )
     
@@ -174,6 +388,25 @@ Examples:
     
     # Stats command
     subparsers.add_parser('stats', help='Show database statistics')
+    
+    # Years command
+    subparsers.add_parser('years', help='Show downloaded years status')
+
+    # Add the bulk command
+    bulk_parser = subparsers.add_parser('bulk', help='Download using true bulk method (fast)')
+    bulk_parser.add_argument('start_year', type=int, help='Start year for collection')
+    bulk_parser.add_argument('end_year', type=int, help='End year for collection')
+    bulk_parser.add_argument('--threads', type=int, default=6, help='Number of download threads (default: 6, max: 8 to avoid rate limiting)')
+    bulk_parser.add_argument('--force', action='store_true', help='Force re-download all filings (skip duplicate check)')
+    bulk_parser.set_defaults(func=cmd_bulk)
+
+    # Add the conservative bulk command
+    conservative_bulk_parser = subparsers.add_parser('conservative_bulk', help='Download using conservative bulk method (rate-limit safe)')
+    conservative_bulk_parser.add_argument('start_year', type=int, help='Start year for collection')
+    conservative_bulk_parser.add_argument('end_year', type=int, help='End year for collection')
+    conservative_bulk_parser.add_argument('--threads', type=int, default=4, help='Number of download threads (default: 4, recommended 2-6 for rate-limit safety)')
+    conservative_bulk_parser.add_argument('--force', action='store_true', help='Force re-download all filings (skip duplicate check)')
+    conservative_bulk_parser.set_defaults(func=cmd_conservative_bulk)
     
     args = parser.parse_args()
     
@@ -199,6 +432,15 @@ Examples:
         
         elif args.command == 'stats':
             show_database_stats()
+        
+        elif args.command == 'years':
+            show_downloaded_years()
+        
+        elif args.command == 'bulk':
+            args.func(args)
+        
+        elif args.command == 'conservative_bulk':
+            args.func(args)
         
         logger.info("Command completed successfully!")
         

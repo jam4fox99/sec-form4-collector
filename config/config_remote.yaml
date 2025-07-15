@@ -1,12 +1,12 @@
 edgar:
   base_url: "https://www.sec.gov/Archives/edgar"
-  user_agent: "Insider Trading Analysis System jakemilken@gmail.com"
+  user_agent: "SEC Form 4 Research System jakemilken@gmail.com"
   rate_limit:
     max_requests: 8
     time_window: 1
 
 database:
-  host: "localhost"
+  host: "YOUR_VM_PUBLIC_IP"  # Replace with VM's public IP
   port: 5432
   name: "insider_trading"
   user: "insider_user"
@@ -18,7 +18,7 @@ processing:
   retry_attempts: 3
   
 collection:
-  start_year: 2003
+  start_year: 1995
   end_year: 2024
   
 paths:
@@ -34,4 +34,11 @@ stock_data:
   
 logging:
   level: INFO
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s" 
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# Remote access settings
+remote:
+  connection_timeout: 30
+  query_timeout: 300
+  retry_attempts: 3
+  ssh_tunnel: false  # Set to true if using SSH tunnel 

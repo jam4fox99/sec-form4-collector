@@ -133,7 +133,8 @@ class DatabaseManager:
             'transactions': 'transactions',
             'stock_prices': 'stock_prices',
             'insider_positions': 'insider_positions',
-            'insider_performance': 'insider_performance'
+            'insider_performance': 'insider_performance',
+            'downloaded_years': 'downloaded_years'
         }
         
         counts = {}
@@ -152,7 +153,8 @@ class DatabaseManager:
         """Run VACUUM ANALYZE on all tables for performance optimization"""
         tables = [
             'companies', 'insiders', 'insider_relationships', 'form4_filings',
-            'transactions', 'stock_prices', 'insider_positions', 'insider_performance'
+            'transactions', 'stock_prices', 'insider_positions', 'insider_performance',
+            'downloaded_years'
         ]
         
         # Note: VACUUM cannot be run inside a transaction
@@ -167,6 +169,65 @@ class DatabaseManager:
                 logger.warning(f"Could not vacuum table {table}: {e}")
         
         connection.close()
+    
+    def get_downloaded_years(self) -> Dict[int, str]:
+        """Get all downloaded years and their status"""
+        from .models import DownloadedYear
+        
+        with self.get_session() as session:
+            years = session.query(DownloadedYear).all()
+            return {year.year: year.status for year in years}
+    
+    def get_year_status(self, year: int) -> Optional[str]:
+        """Get status of a specific year"""
+        from .models import DownloadedYear
+        
+        with self.get_session() as session:
+            year_record = session.query(DownloadedYear).filter(DownloadedYear.year == year).first()
+            return year_record.status if year_record else None
+    
+    def set_year_status(self, year: int, status: str, **kwargs):
+        """Set or update the status of a year"""
+        from .models import DownloadedYear
+        from datetime import datetime
+        
+        with self.get_session() as session:
+            year_record = session.query(DownloadedYear).filter(DownloadedYear.year == year).first()
+            
+            if not year_record:
+                year_record = DownloadedYear(year=year, status=status)
+                session.add(year_record)
+            else:
+                year_record.status = status
+            
+            # Update additional fields if provided
+            if 'total_filings' in kwargs:
+                year_record.total_filings = kwargs['total_filings']
+            if 'processed_quarters' in kwargs:
+                year_record.processed_quarters = kwargs['processed_quarters']
+            if 'downloaded_count' in kwargs:
+                year_record.downloaded_count = kwargs['downloaded_count']
+            if 'stored_count' in kwargs:
+                year_record.stored_count = kwargs['stored_count']
+            if 'error_count' in kwargs:
+                year_record.error_count = kwargs['error_count']
+            if 'skipped_count' in kwargs:
+                year_record.skipped_count = kwargs['skipped_count']
+            if 'error_message' in kwargs:
+                year_record.error_message = kwargs['error_message']
+            
+            # Set timestamps based on status
+            if status == 'in_progress' and not year_record.download_started:
+                year_record.download_started = datetime.utcnow()
+            elif status == 'completed':
+                year_record.download_completed = datetime.utcnow()
+            
+            year_record.last_updated = datetime.utcnow()
+    
+    def is_year_downloaded(self, year: int) -> bool:
+        """Check if a year has been completely downloaded"""
+        status = self.get_year_status(year)
+        return status == 'completed'
 
 
 # Global database manager instance

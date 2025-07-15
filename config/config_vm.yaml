@@ -1,12 +1,12 @@
 edgar:
   base_url: "https://www.sec.gov/Archives/edgar"
-  user_agent: "Insider Trading Analysis System jakemilken@gmail.com"
+  user_agent: "SEC Form 4 Research System jakemilken@gmail.com"
   rate_limit:
     max_requests: 8
     time_window: 1
 
 database:
-  host: "localhost"
+  host: "localhost"  # Local on VM
   port: 5432
   name: "insider_trading"
   user: "insider_user"
@@ -14,11 +14,11 @@ database:
 
 processing:
   batch_size: 1000
-  num_workers: 8
+  num_workers: 6  # 6 threads for VM scraping
   retry_attempts: 3
   
 collection:
-  start_year: 2003
+  start_year: 1995
   end_year: 2024
   
 paths:
@@ -34,4 +34,12 @@ stock_data:
   
 logging:
   level: INFO
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s" 
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# VM-specific settings
+vm:
+  continuous_mode: true
+  restart_on_failure: true
+  max_daily_hours: 20  # Run 20 hours per day
+  pause_between_years: 300  # 5 minutes between years
+  error_threshold: 100  # Stop if 100+ consecutive errors 
